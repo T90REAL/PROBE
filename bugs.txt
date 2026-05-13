@@ -1,0 +1,74 @@
+Bugs Found by PROBE
+===================
+
+------------------------------------------------------------
+Python Standard Library
+------------------------------------------------------------
+
+[json]
+issue#140793
+
+[re]
+issue#140797
+
+[html]
+issue#140875 issue#140877 issue#140878
+
+[functools]
+issue#140873
+
+[collections]
+issue#140911 issue#140914
+
+[statistics]
+issue#140938 issue#140941
+
+[shlex]
+issue#140950
+
+[types]
+issue#140972
+
+------------------------------------------------------------
+PyPI Packages
+------------------------------------------------------------
+
+[boto / boto3]
+issue#4670
+
+[marshmallow]
+issue#2868 issue#2869 issue#2870
+
+[scipy / scipy]
+issue#24062 issue#24069 issue#24082 issue#24084
+
+[sympy / sympy]
+issue#28529 issue#28546 issue#28556 issue#28571 issue#28576 issue#28577 issue#28578 issue#28612 
+issue#28635 issue#28636 issue#28642 issue#28658 issue#28677
+
+[pyproj4 / pyproj]
+issue#1548 issue#1549
+
+[tobgu / pyrsistent]
+issue#318
+
+[cpburnz / pathspec]
+issue#96 issue#97 issue#98
+
+[pyca / cryptography]
+issue#13841 issue#13843
+
+[scikit-hep / awkward]
+issue#3721 issue#3722 issue#3723 issue#3724 issue#3725 issue#3726 issue#3731 issue#3732
+
+[networkx / networkx]
+issue#8377
+
+[aws-lambda-powertools]
+issue#7690 issue#7692 issue#7693
+
+[google-deepmind / optax]
+issue#1499 issue#1500
+
+[huggingface / tokenizers]
+issue#1882
