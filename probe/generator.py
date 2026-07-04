@@ -100,12 +100,12 @@ class Generator:
                     has_given = True
                     if given_line is None:
                         given_line = decorator.lineno
-                        g_indent = lines[decorator.lineno - 1][: decorator.col_offset]
+                        g_indent = self._line_indent(lines[decorator.lineno - 1])
                 elif name == "settings":
                     has_cfg = True
                     start = decorator.lineno - 1
                     end = decorator.end_lineno or decorator.lineno
-                    indent = lines[start][: decorator.col_offset]
+                    indent = self._line_indent(lines[start])
                     repls.append((start, end, [f"{indent}@settings(max_examples=1000, deadline=None)"]))
 
             if has_given and not has_cfg and given_line is not None:
@@ -118,6 +118,10 @@ class Generator:
             lines[start:end] = repl + lines[start:end] if start == end else repl
         newline = "\n" if code.endswith("\n") else ""
         return "\n".join(lines) + newline
+
+    def _line_indent(self, line: str):
+        match = re.match(r"^[ \t]*", line)
+        return match.group(0) if match else ""
 
     def _decorator_name(self, decorator: ast.AST):
         target = decorator.func if isinstance(decorator, ast.Call) else decorator
