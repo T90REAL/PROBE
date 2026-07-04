@@ -7,5 +7,5 @@ class Agent:
         # Read the config file
         pass
     
-    async def run(self, task: str):
+    def run(self, spec: str):
         pass
