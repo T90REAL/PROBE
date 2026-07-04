@@ -7,3 +7,4 @@ probe.toml
 .hypothesis
 __pycache__
 .DS_Store
+.venv
