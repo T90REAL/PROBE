@@ -5,7 +5,7 @@ from typing import Any
 from pathlib import Path
 
 from probe.tools.registry import ToolRegistry
-from probe.agent.agent_config import AgentConfig
+from probe.agent.agent_config import ActiveModel, AgentConfig
 from probe.utils.litellm_backend import LitellmModel, LLMReply, LLMError
 
 
@@ -39,6 +39,14 @@ class HeadlessAgent:
             return None
         return Path(self.config.traj_path)
 
+    @property
+    def active_model(self) -> ActiveModel:
+        return self.config.active_model
+
+    @active_model.setter
+    def active_model(self, value: ActiveModel) -> None:
+        self.set_active_model(value)
+
 
     @classmethod
     def from_toml(
@@ -50,18 +58,18 @@ class HeadlessAgent:
         allowlist: list[str] | None = None,
         histories: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = "auto",
-        use_adv_model: bool = False,
+        active_model: ActiveModel = "normal",
     ) -> "HeadlessAgent":
         data = tomllib.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-        prefix = "adv_" if use_adv_model else ""
-        model_name = _toml_str(data.get(f"{prefix}model_name")) or _toml_str(data.get("model_name"))
-        base_url = _toml_str(data.get(f"{prefix}base_url")) or _toml_str(data.get("base_url")) or ""
-        api_key = _resolve_api_key(_toml_str(data.get(f"{prefix}api_key")) or _toml_str(data.get("api_key")))
         config = AgentConfig(
             system_prompt=system_prompt,
-            model_name=model_name,
-            api_key=api_key,
-            base_url=base_url,
+            model_name=_require_toml_str(data, "model_name"),
+            api_key=_resolve_api_key(_require_toml_str(data, "api_key")),
+            base_url=_require_toml_str(data, "base_url"),
+            adv_model_name=_require_toml_str(data, "adv_model_name"),
+            adv_api_key=_resolve_api_key(_require_toml_str(data, "adv_api_key")),
+            adv_base_url=_require_toml_str(data, "adv_base_url"),
+            active_model=active_model,
             temperature=float(data.get("temperature", 0.8)),
             timeout_per_step=float(data.get("timeout_per_step", 120)),
             max_steps=int(data.get("max_steps", 100)),
@@ -71,19 +79,18 @@ class HeadlessAgent:
         )
 
         return cls(
-            llm=LitellmModel(
-                model_name=config.model_name,
-                api_key=config.api_key,
-                base_url=config.base_url,
-                temperature=config.temperature,
-                timeout=config.timeout_per_step,
-            ),
+            llm=_build_litellm_model(config),
             tools=tools,
             ctx=ctx,
             config=config,
             allowlist=allowlist,
             histories=histories,
         )
+
+    def set_active_model(self, active_model: ActiveModel) -> None:
+        self.config.active_model = active_model
+        self.config.validate_active_model()
+        self.llm = _build_litellm_model(self.config)
 
 
     def run(self, task: str) -> LLMReply:
@@ -194,7 +201,24 @@ def _toml_str(value: Any) -> str | None:
     return text or None
 
 
+def _require_toml_str(data: dict[str, Any], key: str) -> str:
+    value = _toml_str(data.get(key))
+    if value is None:
+        raise LLMError(f"missing required config field: {key}")
+    return value
+
+
 def _resolve_api_key(value: str | None) -> str:
     if not value:
         raise LLMError("missing api key: set api_key in probe.toml")
     return os.environ.get(value) or value
+
+
+def _build_litellm_model(config: AgentConfig) -> LitellmModel:
+    return LitellmModel(
+        model_name=config.active_model_name,
+        api_key=config.active_api_key,
+        base_url=config.active_base_url,
+        temperature=config.temperature,
+        timeout=config.timeout_per_step,
+    )
