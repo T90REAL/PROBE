@@ -1,7 +1,12 @@
-model_name = "gpt-4.1"
-base_url = "https://api.openai.com/v1"
-api_key = "set-me-or-use-env"
+model_name = ["deepseek/deepseek-v4-flash"]
+adv_model_name = ["deepseek/deepseek-v4-flash"]
+base_url = ["https://api.deepseek.com"]
+adv_base_url = ["https://api.deepseek.com"]
+api_key = [""set-me-or-use-env"]
+adv_api_key = [""set-me-or-use-env"]
 temperature = 0.8
-interactive = true
-adv_refine = true
+interactive = false
+adv_refine = false
+traj_path = "./agent_traces/trajactory.jsonl"
+context_window = 100_000_000
 timeout_per_run = 120
