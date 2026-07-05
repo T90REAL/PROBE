@@ -9,6 +9,9 @@ from probe.agent.agent_config import AgentConfig
 from probe.utils.litellm_backend import LitellmModel, LLMReply, LLMError
 
 
+CONFIG_PATH = Path("probe.toml")
+
+
 class HeadlessAgent:
     def __init__(
         self,
@@ -19,18 +22,23 @@ class HeadlessAgent:
         config: AgentConfig,
         allowlist: list[str] | None = None,
         histories: list[dict[str, Any]] | None = None,
-        traj_path: str | Path | None = None,
     ) -> None:
         self.llm = llm
         self.ctx = ctx
         self.tools = tools
         self.config = config
         self.allowlist = allowlist
-        self.traj_path = Path(traj_path) if traj_path else None
 
         self.step_cnt = 0
         self.current_task = ""
         self.messages: list[dict[str, Any]] = list(histories or [])
+
+    @property
+    def traj_path(self) -> Path | None:
+        if self.config.traj_path is None:
+            return None
+        return Path(self.config.traj_path)
+
 
     @classmethod
     def from_toml(
@@ -39,37 +47,42 @@ class HeadlessAgent:
         tools: ToolRegistry,
         ctx: Any,
         system_prompt: str,
-        path: str | Path = "probe.toml",
         allowlist: list[str] | None = None,
         histories: list[dict[str, Any]] | None = None,
-        max_steps: int = 100,
         tool_choice: str | dict[str, Any] | None = "auto",
         use_adv_model: bool = False,
     ) -> "HeadlessAgent":
-        data = tomllib.loads(Path(path).read_text(encoding="utf-8"))
+        data = tomllib.loads(CONFIG_PATH.read_text(encoding="utf-8"))
         prefix = "adv_" if use_adv_model else ""
         model_name = _toml_str(data.get(f"{prefix}model_name")) or _toml_str(data.get("model_name"))
         base_url = _toml_str(data.get(f"{prefix}base_url")) or _toml_str(data.get("base_url")) or ""
         api_key = _resolve_api_key(_toml_str(data.get(f"{prefix}api_key")) or _toml_str(data.get("api_key")))
+        config = AgentConfig(
+            system_prompt=system_prompt,
+            model_name=model_name,
+            api_key=api_key,
+            base_url=base_url,
+            temperature=float(data.get("temperature", 0.8)),
+            timeout_per_step=float(data.get("timeout_per_step", 120)),
+            max_steps=int(data.get("max_steps", 100)),
+            context_window=int(data.get("context_window", 0)),
+            traj_path=_toml_str(data.get("traj_path")),
+            tool_choice=tool_choice,
+        )
 
         return cls(
             llm=LitellmModel(
-                model_name=model_name,
-                api_key=api_key,
-                base_url=base_url,
-                temperature=float(data.get("temperature", 0.8)),
-                timeout=float(data.get("timeout_per_run", 120)),
+                model_name=config.model_name,
+                api_key=config.api_key,
+                base_url=config.base_url,
+                temperature=config.temperature,
+                timeout=config.timeout_per_step,
             ),
             tools=tools,
             ctx=ctx,
-            config=AgentConfig(
-                system_prompt=system_prompt,
-                max_steps=max_steps,
-                tool_choice=tool_choice,
-            ),
+            config=config,
             allowlist=allowlist,
             histories=histories,
-            traj_path=_toml_str(data.get("traj_path")),
         )
 
 
@@ -96,6 +109,7 @@ class HeadlessAgent:
             self.save_trajectory(task=task, status="error", error=str(exc))
             raise
 
+
     def save_trajectory(
         self,
         *,
@@ -104,10 +118,11 @@ class HeadlessAgent:
         final: str = "",
         error: str = "",
     ) -> None:
-        if self.traj_path is None:
+        traj_path = self.traj_path
+        if traj_path is None:
             return
 
-        self.traj_path.parent.mkdir(parents=True, exist_ok=True)
+        traj_path.parent.mkdir(parents=True, exist_ok=True)
         record = {
             "status": status,
             "task": task,
@@ -116,7 +131,7 @@ class HeadlessAgent:
             "steps": self.step_cnt,
             "messages": self.messages,
         }
-        with self.traj_path.open("a", encoding="utf-8") as fh:
+        with traj_path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
