@@ -3,9 +3,10 @@ AGENTS.md
 probe.toml
 
 # Cache files
-.pytest_cache
-.hypothesis
-__pycache__
-.DS_Store
-.venv
-./tmp
+.pytest_cache/
+.hypothesis/
+__pycache__/
+.DS_Store/
+.venv/
+tmp/
+agent_traces/
