@@ -1,0 +1,185 @@
+import os
+import json
+import tomllib
+from typing import Any
+from pathlib import Path
+
+from probe.tools.registry import ToolRegistry
+from probe.agent.agent_config import AgentConfig
+from probe.utils.litellm_backend import LitellmModel, LLMReply, LLMError
+
+
+class HeadlessAgent:
+    def __init__(
+        self,
+        *,
+        llm: LitellmModel,
+        tools: ToolRegistry,
+        ctx: Any,
+        config: AgentConfig,
+        allowlist: list[str] | None = None,
+        histories: list[dict[str, Any]] | None = None,
+        traj_path: str | Path | None = None,
+    ) -> None:
+        self.llm = llm
+        self.ctx = ctx
+        self.tools = tools
+        self.config = config
+        self.allowlist = allowlist
+        self.traj_path = Path(traj_path) if traj_path else None
+
+        self.step_cnt = 0
+        self.current_task = ""
+        self.messages: list[dict[str, Any]] = list(histories or [])
+
+    @classmethod
+    def from_toml(
+        cls,
+        *,
+        tools: ToolRegistry,
+        ctx: Any,
+        system_prompt: str,
+        path: str | Path = "probe.toml",
+        allowlist: list[str] | None = None,
+        histories: list[dict[str, Any]] | None = None,
+        max_steps: int = 100,
+        tool_choice: str | dict[str, Any] | None = "auto",
+        use_adv_model: bool = False,
+    ) -> "HeadlessAgent":
+        data = tomllib.loads(Path(path).read_text(encoding="utf-8"))
+        prefix = "adv_" if use_adv_model else ""
+        model_name = _toml_str(data.get(f"{prefix}model_name")) or _toml_str(data.get("model_name"))
+        base_url = _toml_str(data.get(f"{prefix}base_url")) or _toml_str(data.get("base_url")) or ""
+        api_key = _resolve_api_key(_toml_str(data.get(f"{prefix}api_key")) or _toml_str(data.get("api_key")))
+
+        return cls(
+            llm=LitellmModel(
+                model_name=model_name,
+                api_key=api_key,
+                base_url=base_url,
+                temperature=float(data.get("temperature", 0.8)),
+                timeout=float(data.get("timeout_per_run", 120)),
+            ),
+            tools=tools,
+            ctx=ctx,
+            config=AgentConfig(
+                system_prompt=system_prompt,
+                max_steps=max_steps,
+                tool_choice=tool_choice,
+            ),
+            allowlist=allowlist,
+            histories=histories,
+            traj_path=_toml_str(data.get("traj_path")),
+        )
+
+
+    def run(self, task: str) -> LLMReply:
+        """
+        -> initialize history / message
+        -> while not done:
+             step()
+         """
+        self.messages = [
+            {"role": "system", "content": self.config.system_prompt},
+            {"role": "user", "content": task},
+        ]
+
+        self.current_task = task
+        self.step_cnt = 0
+        try:
+            while True:
+                reply = self.step()
+                if not reply.tool_calls:
+                    self.save_trajectory(task=task, status="ok", final=reply.content)
+                    return reply
+        except Exception as exc:
+            self.save_trajectory(task=task, status="error", error=str(exc))
+            raise
+
+    def save_trajectory(
+        self,
+        *,
+        task: str,
+        status: str,
+        final: str = "",
+        error: str = "",
+    ) -> None:
+        if self.traj_path is None:
+            return
+
+        self.traj_path.parent.mkdir(parents=True, exist_ok=True)
+        record = {
+            "status": status,
+            "task": task,
+            "final": final,
+            "error": error,
+            "steps": self.step_cnt,
+            "messages": self.messages,
+        }
+        with self.traj_path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+    def _to_assistant_message(self, reply: LLMReply) -> dict[str, Any]:
+        message = {
+            "role": "assistant",
+            "content": reply.content,
+        }
+        if reply.tool_calls:
+            message["tool_calls"] = [call.to_openai() for call in reply.tool_calls]
+        return message
+
+
+    def _to_tool_message(self, tool_call_id: str, result: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "role": "tool",
+            "tool_call_id": tool_call_id,
+            "content": json.dumps(result, ensure_ascii=False),
+        }
+
+
+    def step(self) -> LLMReply:
+        """ 
+        -> query model 
+        -> parse actions / tool_calls 
+        -> execute tools 
+        -> append observations
+        """
+        if self.step_cnt >= self.config.max_steps:
+            raise LLMError(f"max steps {self.config.max_steps} exceeded!")
+
+        self.step_cnt += 1
+        message = self.llm.query(
+            messages=self.messages,
+            tools=self.tools.as_openai_tools(self.allowlist),
+            tool_choice=self.config.tool_choice,
+        )
+
+        self.messages.append(self._to_assistant_message(message))
+        
+        for call in message.tool_calls:
+            result = self.tools.dispatch(
+                self.ctx,
+                call.name,
+                call.arguments,
+                allowlist=self.allowlist,
+            )
+            self.messages.append(self._to_tool_message(call.id, result))
+
+        self.save_trajectory(task=self.current_task, status="step")
+        return message
+
+
+def _toml_str(value: Any) -> str | None:
+    if isinstance(value, list):
+        value = value[0] if value else None
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _resolve_api_key(value: str | None) -> str:
+    if not value:
+        raise LLMError("missing api key: set api_key in probe.toml")
+    return os.environ.get(value) or value
